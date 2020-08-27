@@ -132,6 +132,20 @@ contract TokenVesting is Ownable {
     }
 
     /**
+     * @dev Returns schedule for vesting.
+     */
+    function schedule() public view returns (uint256[] memory) {
+        return _schedule;
+    }
+
+    /**
+     * @dev Returns percentages for vesting.
+     */
+    function basePercents() public view returns (uint256[] memory) {
+        return _basePercents;
+    }
+
+    /**
      * @notice Transfers vested tokens to sender.
      */
     function release() public {
