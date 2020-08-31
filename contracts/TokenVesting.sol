@@ -32,31 +32,35 @@ contract TokenVesting is Ownable {
 
     mapping (address => uint256) private _released;
 
-    mapping (address =>  uint256[]) private _percents;
+    mapping (address =>  bool[]) private _vested;
 
-    uint256[] private _basePercents;
+    bool[] private _baseVested;
 
     uint256[] private _schedule;
 
+    uint256 private _amountPerSchedule;
+
     /**
      * @dev Creates a vesting contract that vests its balance of any ERC20 token to the
-     * beneficiary, gradually in a linear fashion until start + duration. By then all
-     * of the balance will have vested.
+     * beneficiary, in chunks of amountPerSchedule, until the schedule has completed.
      * @param token ERC20 token which is being vested
      * @param schedule array of the timestamps (as Unix time) at which point vesting starts
-     * @param basePercents array of the percents which can be released at which vesting points
+     * @param amountPerSchedule amount to be vested per schedule
      * @param revocable whether the vesting is revocable or not
      */
-    constructor (IERC20 token, uint256[] memory schedule,
-        uint256[] memory basePercents, bool revocable) public {
+    constructor (IERC20 token, uint256[] memory schedule, uint256 amountPerSchedule, bool revocable) public {
 
-        require(schedule.length == basePercents.length, "TokenVesting: Incorrect release schedule");
         require(schedule.length <= 255);
+
+        bool[] memory baseVested = new bool[](schedule.length); // default is false
 
         _token = token;
 
         _schedule = schedule;
-        _basePercents = basePercents;
+        
+        _amountPerSchedule = amountPerSchedule;
+        
+        _baseVested = baseVested;
 
         _revocable = revocable;
     }
@@ -89,8 +93,11 @@ contract TokenVesting is Ownable {
         return _released[holder];
     }
 
-    function percent(address holder, uint idx) public view returns (uint256) {
-        return _percents[holder][idx];
+    /**
+     * @return If the amount for schedule at idx passed has been vested.
+    */
+    function vested(address holder, uint idx) public view returns (bool) {
+        return _vested[holder][idx];
     }
 
     /**
@@ -105,7 +112,7 @@ contract TokenVesting is Ownable {
 
         _balances[holder] = amount;
 
-        _percents[holder] = _basePercents;
+        _vested[holder] = _baseVested;
     }
 
     /**
@@ -124,25 +131,11 @@ contract TokenVesting is Ownable {
     function vestedAmount(uint256 ts, address holder) public view returns (uint256) {
         int8 unreleasedIdx = _releasableIdx(ts, holder);
         if (unreleasedIdx >= 0) {
-            return _balances[holder].mul(_percents[holder][uint(unreleasedIdx)]).div(100);
+            return _amountPerSchedule;
         } else {
             return 0;
         }
 
-    }
-
-    /**
-     * @dev Returns schedule for vesting.
-     */
-    function schedule() public view returns (uint256[] memory) {
-        return _schedule;
-    }
-
-    /**
-     * @dev Returns percentages for vesting.
-     */
-    function basePercents() public view returns (uint256[] memory) {
-        return _basePercents;
     }
 
     /**
@@ -153,11 +146,11 @@ contract TokenVesting is Ownable {
 
         require(unreleasedIdx >= 0, "TokenVesting: no tokens are due");
 
-        uint256 unreleasedAmount = _balances[_msgSender()].mul(_percents[_msgSender()][uint(unreleasedIdx)]).div(100);
+        uint256 unreleasedAmount = _amountPerSchedule;
 
         _token.safeTransfer(_msgSender(), unreleasedAmount);
 
-        _percents[_msgSender()][uint(unreleasedIdx)] = 0;
+        _vested[_msgSender()][uint(unreleasedIdx)] = true;
         _released[_msgSender()] = _released[_msgSender()].add(unreleasedAmount);
         _totalReleased = _totalReleased.add(unreleasedAmount);
 
@@ -168,12 +161,12 @@ contract TokenVesting is Ownable {
      * @dev Calculates the index that has already vested but hasn't been released yet for 'holder'.
      */
     function _releasableIdx(uint256 ts, address holder) private view returns (int8) {
-        if (_percents[holder].length == 0) {
+        if (_vested[holder].length == 0) {
             return -1;
         }
 
         for (uint8 i = 0; i < _schedule.length; i++) {
-            if (ts > _schedule[i] && _percents[holder][i] > 0) {
+            if (ts > _schedule[i] && _vested[holder][i] == false) {
                 return int8(i);
             }
         }
@@ -181,4 +174,3 @@ contract TokenVesting is Ownable {
         return -1;
     }
 }
-
