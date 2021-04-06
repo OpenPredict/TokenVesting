@@ -18,11 +18,11 @@
  *
  */
 
-// const HDWalletProvider = require('@truffle/hdwallet-provider');
+const HDWalletProvider = require('truffle-hdwallet-provider');
 // const infuraKey = "fj4jll3k.....";
 //
-// const fs = require('fs');
-// const mnemonic = fs.readFileSync(".secret").toString().trim();
+const fs = require('fs');
+const mnemonic = fs.readFileSync(".secret").toString().trim();
 
 module.exports = {
   /**
@@ -42,11 +42,27 @@ module.exports = {
     // tab if you use this network and you must also set the `host`, `port` and `network_id`
     // options below to some value.
     //
-    // development: {
-    //  host: "127.0.0.1",     // Localhost (default: none)
-    //  port: 8545,            // Standard Ethereum port (default: none)
-    //  network_id: "*",       // Any network (default: none)
-    // },
+    sandbox: {
+        url: "https://sandbox.truffleteams.com/4a7ed86a-caa1-4936-a48f-18e804fe1264",
+        network_id: 1
+    },
+    development: {
+      host: "127.0.0.1",     // Localhost (default: none)
+      port: 8545,            // Standard Ethereum port (default: none)
+      network_id: "*",
+      secret : 'myth like bonus scare over problem client lizard pioneer submit female collect' // ganache-cli -d
+    },
+    test: {
+      host: "127.0.0.1",     // Localhost (default: none)
+      port: 8545,            // Standard Ethereum port (default: none)
+      network_id: "*",
+      secret : 'myth like bonus scare over problem client lizard pioneer submit female collect' // ganache-cli -d
+    },
+    //mainnet: {
+    //    provider: () => new HDWalletProvider(mnemonic, `https://api.archivenode.io/ab93hrzsihmgabn9ndxab93o2t4u2ct8`),
+    //    network_id: 1,
+    //    networkCheckTimeout: 10000000
+    //}
     // Another network with more advanced options...
     // advanced: {
     // port: 8777,             // Custom port
@@ -82,13 +98,13 @@ module.exports = {
   // Configure your compilers
   compilers: {
     solc: {
-      version: "0.6.2",    // Fetch exact version from solc-bin (default: truffle's version)
+      version: "0.8.0",    // Fetch exact version from solc-bin (default: truffle's version)
       // docker: true,        // Use "0.5.1" you've installed locally with docker (default: false)
       // settings: {          // See the solidity docs for advice about optimization and evmVersion
-      //  optimizer: {
-      //    enabled: false,
-      //    runs: 200
-      //  },
+       optimizer: {
+         enabled: false,
+         runs: 200
+       },
       //  evmVersion: "byzantium"
       // }
     },

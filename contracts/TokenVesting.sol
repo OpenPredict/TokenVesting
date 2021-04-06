@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.6.0;
+pragma solidity ^0.8.0;
 
-import "openzeppelin-solidity/contracts/token/ERC20/SafeERC20.sol";
-import "openzeppelin-solidity/contracts/access/Ownable.sol";
-import "openzeppelin-solidity/contracts/math/SafeMath.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /**
  * @title PartnersVesting
@@ -19,101 +19,101 @@ contract TokenVesting is Ownable {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
 
-    event TokensReleased(address holder, address token, uint256 amount);
+    event TokensReleased(uint schedule, address holder, address token, uint256 amount);
 
     // The token being vested
     IERC20 public _token;
-
+    // If the contract is revocable
     bool private _revocable;
+    // total amount the contract has released.
+    uint256 totalReleased;
 
-    uint256 private _totalReleased = 0;
+    uint256 public immutable VESTING_PERIOD = 2629746; // 1 month in seconds
 
-    mapping (address => uint256) private _balances;
+    // Schedule. 
+    struct Schedule {
+        string id;               // eg. "foundation", "marketing" etc.
+        uint256 startPeriod;     // the timestamp of the first period.
+        uint256 numPeriods;      // number of periods to vest.
+        uint256 amountPerPeriod; // amount of the token to release each period.
+    }
 
-    mapping (address => uint256) private _released;
-
-    mapping (address =>  bool[]) private _vested;
-
-    bool[] private _baseVested;
-
-    uint256[] private _schedule;
-
-    uint256 private _amountPerSchedule;
-
+    Schedule[] public schedules;
+    mapping(uint => mapping (address => uint256)) balances; // balances assigned to a wallet for a schedule
+    mapping(uint => mapping (address => uint256)) released; // released to a wallet for a schedule
+    mapping(uint => mapping (address => bool[])) vested;    // array of bools indicating whether wallet has vested or not.
+    
     /**
      * @dev Creates a vesting contract that vests its balance of any ERC20 token to the
-     * beneficiary, in chunks of amountPerSchedule, until the schedule has completed.
+     * beneficiary, in chunks of amountPerPeriod, until the schedule has completed.
      * @param token ERC20 token which is being vested
-     * @param schedule array of the timestamps (as Unix time) at which point vesting starts
-     * @param amountPerSchedule amount to be vested per schedule
      * @param revocable whether the vesting is revocable or not
      */
-    constructor (IERC20 token, uint256[] memory schedule, uint256 amountPerSchedule, bool revocable) public {
-
-        require(schedule.length <= 255);
-
-        bool[] memory baseVested = new bool[](schedule.length); // default is false
-
+    constructor (IERC20 token, bool revocable) {
         _token = token;
-
-        _schedule = schedule;
-        
-        _amountPerSchedule = amountPerSchedule;
-        
-        _baseVested = baseVested;
-
         _revocable = revocable;
     }
 
+    function addSchedule(string calldata id, uint256 startPeriod, uint256 numPeriods, uint256 amountPerPeriod, address[] calldata holders) external onlyOwner {
+        require(numPeriods <= 255);
+
+        Schedule memory schedule;
+
+        schedule.id = id;
+        schedule.startPeriod = startPeriod;
+        schedule.numPeriods = numPeriods;
+        schedule.amountPerPeriod = amountPerPeriod;
+        schedules.push(schedule);
+
+        uint scheduleID = schedules.length-1;
+
+        // set initial holders.
+        for(uint i=0; i<holders.length; i++){
+            balances[scheduleID][holders[i]] = amountPerPeriod.mul(numPeriods).div(holders.length);
+            vested[scheduleID][holders[i]] = new bool[](numPeriods);
+        }
+    }
+
+    // /**
+    //  * @dev Returns the amount of tokens owned by `account`.
+    //  */
+    function getNumSchedules() external view returns (uint256) {
+        return schedules.length;
+    }
+
+    // /**
+    //  * @return the amount of the total token released.
+    //  */
+    // function totalReleased() public view returns (uint256) {
+    //     return _totalReleased;
+    // }
+
+    // /**
+    //  * @return the amount of the token released by 'holder'.
+    // */
+    // function released(address holder) public view returns (uint256) {
+    //     return _released[holder];
+    // }
+
+    // /**
+    //  * @return If the amount for schedule at idx passed has been vested.
+    // */
+    // function vested(address holder, uint idx) public view returns (bool) {
+    //     return _vested[holder][idx];
+    // }
+
     /**
-     * @dev Returns the amount of tokens owned by `account`.
+     * @return the vested amount of the token for a particular timestamp 'ts' and 'holder'.
      */
-    function balanceOf(address account) external view returns (uint256) {
-        return _balances[account];
-    }
+    // function vestedAmount(uint256 ts, address holder) public view returns (uint256) {
+    //     int8 unreleasedIdx = _releasableIdx(ts, holder);
+    //     if (unreleasedIdx >= 0) {
+    //         return _amountPerPeriod;
+    //     } else {
+    //         return 0;
+    //     }
 
-    /**
-    * @return true if the vesting is revocable.
-    */
-    function revocable() public view returns (bool) {
-        return _revocable;
-    }
-
-    /**
-     * @return the amount of the total token released.
-     */
-    function totalReleased() public view returns (uint256) {
-        return _totalReleased;
-    }
-
-    /**
-     * @return the amount of the token released by 'holder'.
-    */
-    function released(address holder) public view returns (uint256) {
-        return _released[holder];
-    }
-
-    /**
-     * @return If the amount for schedule at idx passed has been vested.
-    */
-    function vested(address holder, uint idx) public view returns (bool) {
-        return _vested[holder][idx];
-    }
-
-    /**
-     * @dev Set the balance of available token equal to 'amount' for `holder`.
-     *
-     * Requirements:
-     *
-     * - `holder` cannot be the zero address.
-     */
-    function setBalance(address holder, uint256 amount) public onlyOwner {
-        require(holder != address(0), "ERC20: setting to the zero address");
-
-        _balances[holder] = amount;
-
-        _vested[holder] = _baseVested;
-    }
+    // }
 
     /**
      * @notice Allows the owner to revoke the vesting. Tokens already vested
@@ -126,51 +126,36 @@ contract TokenVesting is Ownable {
     }
 
     /**
-     * @return the vested amount of the token for a particular timestamp 'ts' and 'holder'.
-     */
-    function vestedAmount(uint256 ts, address holder) public view returns (uint256) {
-        int8 unreleasedIdx = _releasableIdx(ts, holder);
-        if (unreleasedIdx >= 0) {
-            return _amountPerSchedule;
-        } else {
-            return 0;
-        }
-
-    }
-
-    /**
      * @notice Transfers vested tokens to sender.
      */
-    function release() public {
-        int8 unreleasedIdx = _releasableIdx(block.timestamp, _msgSender());
+    function release(uint scheduleID) public {
+        uint256 unreleasedIdx = _releasableIdx(scheduleID, _msgSender());
+        uint256 unreleasedAmount = schedules[scheduleID].amountPerPeriod;        
 
-        require(unreleasedIdx >= 0, "TokenVesting: no tokens are due");
-
-        uint256 unreleasedAmount = _amountPerSchedule;
+        vested[scheduleID][_msgSender()][unreleasedIdx] = true;
+        released[scheduleID][_msgSender()] = released[scheduleID][_msgSender()].add(unreleasedAmount);
+        totalReleased = totalReleased.add(unreleasedAmount);
 
         _token.safeTransfer(_msgSender(), unreleasedAmount);
-
-        _vested[_msgSender()][uint(unreleasedIdx)] = true;
-        _released[_msgSender()] = _released[_msgSender()].add(unreleasedAmount);
-        _totalReleased = _totalReleased.add(unreleasedAmount);
-
-        emit TokensReleased(_msgSender(), address(_token), unreleasedAmount);
+        emit TokensReleased(scheduleID, _msgSender(), address(_token), unreleasedAmount);
     }
 
     /**
      * @dev Calculates the index that has already vested but hasn't been released yet for 'holder'.
      */
-    function _releasableIdx(uint256 ts, address holder) private view returns (int8) {
-        if (_vested[holder].length == 0) {
-            return -1;
-        }
+    function _releasableIdx(uint scheduleID,address holder) private view returns (uint256) {
 
-        for (uint8 i = 0; i < _schedule.length; i++) {
-            if (ts > _schedule[i] && _vested[holder][i] == false) {
-                return int8(i);
+        require(vested[scheduleID][holder].length > 0, "_releasableIdx: no vesting for sender.");
+
+        uint256 startPeriod = schedules[scheduleID].startPeriod;
+
+        for (uint256 index = 0; index < schedules[scheduleID].numPeriods; index++) {
+            if (block.timestamp > startPeriod.add(index.mul(VESTING_PERIOD)) && vested[scheduleID][holder][index] == false) {
+                return index;
             }
         }
 
-        return -1;
+        require(false, "_releasableIdx: no tokens are due.");
+        return 0;
     }
 }
