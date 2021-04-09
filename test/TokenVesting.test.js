@@ -43,7 +43,13 @@ contract("TokenStaking", async (accounts) => {
 
     beforeEach( async () => {
         contracts['ERC20'] = await ERC20.new("OpenPredict Token", "OPT", ethers.utils.parseUnits('9900000'));
-        contracts['TokenVesting'] = await TokenVesting.new(contracts['ERC20'].address, true);
+        contracts['TokenVesting'] = await TokenVesting.new(
+            contracts['ERC20'].address, 
+            true,
+            [
+                accounts[0],
+                accounts[9],
+            ]);
 
         // add all the schedules
         await contracts['TokenVesting'].addSchedule(
@@ -135,28 +141,27 @@ contract("TokenStaking", async (accounts) => {
         for(let i=0; i < numPeriods; i++){
             console.log('period: ' + i);
             await truffleAssert.reverts(
-                contracts['TokenVesting'].release(scheduleIndex, {from: accounts[3]}),
-                "_releasableIdx: no vesting for sender."
+                contracts['TokenVesting'].release(scheduleIndex, [accounts[3]], {from: accounts[3]}),
+                "_releasableIdx: no vesting for holder."
             );
             // advance time by 1 week, try vest 
             await advanceTime(7 * SECS_DAILY);
             await sendRpc('evm_mine');
 
             await truffleAssert.reverts(
-                contracts['TokenVesting'].release(scheduleIndex, {from: accounts[1]}),
-                "_releasableIdx: no tokens are due."
+                contracts['TokenVesting'].release(scheduleIndex, [accounts[1]], {from: accounts[1]}),
+                "_releasableIdx: no tokens are due for holder."
             );
 
             await truffleAssert.reverts(
-                contracts['TokenVesting'].release(scheduleIndex, {from: accounts[2]}),
-                "_releasableIdx: no tokens are due."
+                contracts['TokenVesting'].release(scheduleIndex, [accounts[2]], {from: accounts[2]}),
+                "_releasableIdx: no tokens are due for holder."
             );
 
             //advance by 3 weeks, vest successfully
             await advanceTime(FULL_PERIOD - (7 * SECS_DAILY));
             await sendRpc('evm_mine');
-            await contracts['TokenVesting'].release(scheduleIndex, {from: accounts[1]});
-            await contracts['TokenVesting'].release(scheduleIndex, {from: accounts[2]});
+            await contracts['TokenVesting'].release(scheduleIndex, [accounts[1], accounts[2]]);
         }
     
         //verify balance of claim tokens is correct..
@@ -166,5 +171,26 @@ contract("TokenStaking", async (accounts) => {
         
         assert.equal(schedule['amountPerPeriod'].mul(numPeriods).toString(), balanceFirst.toString());
         assert.equal(schedule['amountPerPeriod'].mul(numPeriods).toString(), balanceSecond.toString());
+    })
+
+    it("Should only allow admins to perform admin functionality", async () => {
+        await truffleAssert.reverts(
+            contracts['TokenVesting'].addSchedule(
+                "Marketing",
+                1618963200,
+                17,
+                ethers.utils.parseUnits('27500'),
+                [accounts[1], accounts[2]],
+                { from: accounts[3] }
+            ),
+            "_onlyOwner: sender is not an owner."
+        );
+
+        await truffleAssert.reverts(
+            contracts['TokenVesting'].revoke({from: accounts[3]}),
+            "_onlyOwner: sender is not an owner."
+        );
+
+        await contracts['TokenVesting'].revoke({from: accounts[9]});
     })
 })

@@ -9,7 +9,13 @@ module.exports = async function (deployer, network, accounts) {
     contracts= []
     if(network == "development") {
         contracts['ERC20'] = await ERC20.new("OpenPredict Token", "OPT", ethers.utils.parseUnits('9900000'));
-        contracts['TokenVesting'] = await TokenVesting.new(contracts['ERC20'].address, true);
+        contracts['TokenVesting'] = await TokenVesting.new(
+                contracts['ERC20'].address, 
+                true,
+                [
+                        accounts[0],
+                        accounts[1],
+                ]);
 
         // add all the schedules
         await contracts['TokenVesting'].addSchedule(

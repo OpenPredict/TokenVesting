@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
@@ -9,7 +8,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
  * @title PartnersVesting
  * @dev A token holder contract that can release its token balance gradually at different vesting points
  */
-contract TokenVesting is Ownable {
+contract TokenVesting {
     // The vesting schedule is time-based (i.e. using block timestamps as opposed to e.g. block numbers), and is
     // therefore sensitive to timestamp manipulation (which is something miners can do, to a certain degree). Therefore,
     // it is recommended to avoid using short time durations (less than a minute). Typical vesting schemes, with a
@@ -23,10 +22,8 @@ contract TokenVesting is Ownable {
 
     // The token being vested
     IERC20 public _token;
-    // If the contract is revocable
-    bool private _revocable;
     // total amount the contract has released.
-    uint256 totalReleased;
+    uint256 public totalReleased;
 
     uint256 public immutable VESTING_PERIOD = 2629746; // 1 month in seconds
 
@@ -42,6 +39,14 @@ contract TokenVesting is Ownable {
     mapping(uint => mapping (address => uint256)) balances; // balances assigned to a wallet for a schedule
     mapping(uint => mapping (address => uint256)) released; // released to a wallet for a schedule
     mapping(uint => mapping (address => bool[])) vested;    // array of bools indicating whether wallet has vested or not.
+    mapping(address => bool) owners;                        // contract owners. can perform admin functionality.
+
+    // If the contract is revocable
+    bool _revocable;
+
+    function _onlyOwner() private view {
+        require(owners[msg.sender], "_onlyOwner: sender is not an owner.");
+    }
     
     /**
      * @dev Creates a vesting contract that vests its balance of any ERC20 token to the
@@ -49,12 +54,17 @@ contract TokenVesting is Ownable {
      * @param token ERC20 token which is being vested
      * @param revocable whether the vesting is revocable or not
      */
-    constructor (IERC20 token, bool revocable) {
+    constructor (IERC20 token, bool revocable, address[] memory _owners) {
         _token = token;
         _revocable = revocable;
+        for(uint i=0; i < _owners.length; i++){
+            owners[_owners[i]] = true;
+        }
     }
 
-    function addSchedule(string calldata id, uint256 startPeriod, uint256 numPeriods, uint256 amountPerPeriod, address[] calldata holders) external onlyOwner {
+    function addSchedule(string calldata id, uint256 startPeriod, uint256 numPeriods, uint256 amountPerPeriod, address[] calldata holders) external {
+        _onlyOwner();
+
         require(numPeriods <= 255);
 
         Schedule memory schedule;
@@ -81,63 +91,34 @@ contract TokenVesting is Ownable {
         return schedules.length;
     }
 
-    // /**
-    //  * @return the amount of the total token released.
-    //  */
-    // function totalReleased() public view returns (uint256) {
-    //     return _totalReleased;
-    // }
-
-    // /**
-    //  * @return the amount of the token released by 'holder'.
-    // */
-    // function released(address holder) public view returns (uint256) {
-    //     return _released[holder];
-    // }
-
-    // /**
-    //  * @return If the amount for schedule at idx passed has been vested.
-    // */
-    // function vested(address holder, uint idx) public view returns (bool) {
-    //     return _vested[holder][idx];
-    // }
-
     /**
-     * @return the vested amount of the token for a particular timestamp 'ts' and 'holder'.
+     * @notice Allows the owner to revoke the vesting.
+     * ONLY TO BE USED IN CASE OF EMERGENCY.
      */
-    // function vestedAmount(uint256 ts, address holder) public view returns (uint256) {
-    //     int8 unreleasedIdx = _releasableIdx(ts, holder);
-    //     if (unreleasedIdx >= 0) {
-    //         return _amountPerPeriod;
-    //     } else {
-    //         return 0;
-    //     }
+    function revoke() public {
+        _onlyOwner();
 
-    // }
-
-    /**
-     * @notice Allows the owner to revoke the vesting. Tokens already vested
-     * remain in the contract, the rest are returned to the owner.
-     */
-    function revoke(uint256 amount) public onlyOwner {
         require(_revocable, "TokenVesting: cannot revoke");
 
-        _token.safeTransfer(owner(), amount);
+        uint256 balance = _token.balanceOf(address(this));
+        _token.safeTransfer(msg.sender, balance);
     }
 
     /**
-     * @notice Transfers vested tokens to sender.
+     * @notice Transfers vested tokens to holders.
      */
-    function release(uint scheduleID) public {
-        uint256 unreleasedIdx = _releasableIdx(scheduleID, _msgSender());
-        uint256 unreleasedAmount = schedules[scheduleID].amountPerPeriod;        
+    function release(uint scheduleID, address[] calldata holders) public {
+        for(uint i=0; i<holders.length; i++){
+            uint256 unreleasedIdx = _releasableIdx(scheduleID, holders[i]);
+            uint256 unreleasedAmount = schedules[scheduleID].amountPerPeriod;        
 
-        vested[scheduleID][_msgSender()][unreleasedIdx] = true;
-        released[scheduleID][_msgSender()] = released[scheduleID][_msgSender()].add(unreleasedAmount);
-        totalReleased = totalReleased.add(unreleasedAmount);
+            vested[scheduleID][holders[i]][unreleasedIdx] = true;
+            released[scheduleID][holders[i]] = released[scheduleID][holders[i]].add(unreleasedAmount);
+            totalReleased = totalReleased.add(unreleasedAmount);
 
-        _token.safeTransfer(_msgSender(), unreleasedAmount);
-        emit TokensReleased(scheduleID, _msgSender(), address(_token), unreleasedAmount);
+            _token.safeTransfer(holders[i], unreleasedAmount);
+            emit TokensReleased(scheduleID, holders[i], address(_token), unreleasedAmount);
+        }
     }
 
     /**
@@ -145,7 +126,7 @@ contract TokenVesting is Ownable {
      */
     function _releasableIdx(uint scheduleID,address holder) private view returns (uint256) {
 
-        require(vested[scheduleID][holder].length > 0, "_releasableIdx: no vesting for sender.");
+        require(vested[scheduleID][holder].length > 0, "_releasableIdx: no vesting for holder.");
 
         uint256 startPeriod = schedules[scheduleID].startPeriod;
 
@@ -155,7 +136,7 @@ contract TokenVesting is Ownable {
             }
         }
 
-        require(false, "_releasableIdx: no tokens are due.");
+        require(false, "_releasableIdx: no tokens are due for holder.");
         return 0;
     }
 }
